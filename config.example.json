@@ -1,0 +1,20 @@
+{
+  "listen": { "host": "127.0.0.1", "port": 8787 },
+  "secureCookies": false,
+  "auth": { "username": "admin", "passwordHash": null, "sessionHours": 336 },
+  "hugo": { "binary": null },
+  "sites": [
+    {
+      "id": "my-blog",
+      "name": "My Blog",
+      "path": "~/my-blog",
+      "publicURL": "https://example.com/",
+      "postsSection": "posts",
+      "frontMatterStyle": "toha",
+      "build": { "baseURL": "https://example.com/", "environment": "production", "args": [] },
+      "postProcess": { "relativizeHTML": true, "directoryIndexLinks": true },
+      "deploy": { "type": "mc", "target": "myalias/bucket/prefix", "removeExtraneous": false },
+      "git": { "remote": "origin", "branch": "main", "author": { "name": "", "email": "" } }
+    }
+  ]
+}

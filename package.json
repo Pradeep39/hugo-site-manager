@@ -1,0 +1,14 @@
+{
+  "name": "hugo-site-manager",
+  "version": "1.0.0",
+  "description": "Author, preview, publish, upgrade and back up Hugo websites from a browser",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "set-password": "node bin/set-password.js",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}

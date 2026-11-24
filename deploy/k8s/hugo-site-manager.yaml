@@ -1,0 +1,130 @@
+# Hugo Site Manager on the homelab cluster (namespace myminio, like the sites themselves).
+# Before applying:
+#   1. Build & push the image (see README) and set IMAGE below.
+#   2. Create the Secret:  see deploy/k8s/secret.example.sh
+#   3. Point a DNS record for HOST at the ingress (192.168.86.2 / your router's public IP).
+#   Replace every occurrence of:  IMAGE  HOST
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hugo-site-manager-config
+  namespace: myminio
+data:
+  config.json: |
+    {
+      "secureCookies": true,
+      "trustProxy": ["10.244.0.0/16"],
+      "auth": { "username": "pradeep", "sessionHours": 336 },
+      "sites": [
+        {
+          "id": "pradeepr-cloud",
+          "name": "Pradeep's Cloud Blog",
+          "path": "/data/sites/pradeepr.cloud",
+          "publicURL": "https://minio.pradeepr.cloud/mysite/public/index.html",
+          "frontMatterStyle": "toha",
+          "build": { "baseURL": "https://minio.pradeepr.cloud/mysite/public/" },
+          "deploy": { "type": "mc", "target": "minio/mysite/public" },
+          "git": { "remote": "origin", "branch": "main",
+                   "cloneUrl": "https://github.com/Pradeep39/hugo_personalsite.git",
+                   "author": { "name": "Pradeep Reddy", "email": "16216080+Pradeep39@users.noreply.github.com" } }
+        },
+        {
+          "id": "ananyareddy-com",
+          "name": "Ananya Reddy",
+          "path": "/data/sites/ananyareddy.com",
+          "publicURL": "https://ananyareddy.com/",
+          "frontMatterStyle": "toha",
+          "build": { "baseURL": "https://ananyareddy.com/site/public/" },
+          "deploy": { "type": "mc", "target": "minio/site/public" },
+          "git": { "remote": "origin", "branch": "main",
+                   "cloneUrl": "https://github.com/Pradeep39/ananyareddy.com.git",
+                   "author": { "name": "Pradeep Reddy", "email": "16216080+Pradeep39@users.noreply.github.com" } }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hugo-site-manager-data
+  namespace: myminio
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+  labels: { app: hugo-site-manager }
+spec:
+  replicas: 1                 # one writer per working tree
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: hugo-site-manager }
+  template:
+    metadata:
+      labels: { app: hugo-site-manager }
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: IMAGE
+          ports: [{ containerPort: 8787, name: http }]
+          envFrom:
+            - secretRef: { name: hugo-site-manager }   # HSM_PASSWORD_HASH, HSM_SESSION_SECRET, GITHUB_TOKEN, MC_HOST_minio
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: config, mountPath: /config, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 120   # first start clones the sites
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 2Gi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: hugo-site-manager-data }
+        - name: config
+          configMap: { name: hugo-site-manager-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+spec:
+  selector: { app: hugo-site-manager }
+  ports: [{ port: 80, targetPort: http, name: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+  annotations:
+    cert-manager.io/issuer: letsencrypt-prod          # namespaced Issuer, not ClusterIssuer
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m  # image/video uploads
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [HOST]
+      secretName: letsencrypt-prod-hugo-site-manager
+  rules:
+    - host: HOST
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: hugo-site-manager, port: { name: http } }

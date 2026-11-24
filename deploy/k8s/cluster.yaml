@@ -1,0 +1,194 @@
+# Hugo Site Manager as deployed on the homelab cluster (no custom image: stock node image,
+# app code from a ConfigMap tarball, hugo/go downloaded once onto the PVC, mc copied once onto the PVC
+# from the running MinIO pod (minio/mc and quay.io/minio images are no longer publicly pullable):
+#   kubectl -n myminio exec myminio-pool-0-0 -c minio -- cat /usr/bin/mc | kubectl -n myminio exec -i deploy/hugo-site-manager -- sh -c 'mkdir -p /data/tools/bin && cat > /data/tools/bin/mc && chmod +x /data/tools/bin/mc'
+# Secrets (created separately, never in this file):
+#   hugo-site-manager-auth : HSM_PASSWORD_HASH
+#   hugo-site-manager      : GITHUB_TOKEN, MC_HOST_minio, HSM_SESSION_SECRET
+# App code:  kubectl -n myminio create configmap hugo-site-manager-app --from-file=app.tgz
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hugo-site-manager-config
+  namespace: myminio
+data:
+  config.json: |
+    {
+      "secureCookies": true,
+      "trustProxy": ["10.244.0.0/16"],
+      "auth": { "username": "pradeep", "sessionHours": 336 },
+      "sites": [
+        {
+          "id": "pradeepr-cloud",
+          "name": "Pradeep's Cloud Blog",
+          "path": "/data/sites/pradeepr.cloud",
+          "publicURL": "https://minio.pradeepr.cloud/mysite/public/index.html",
+          "frontMatterStyle": "toha",
+          "build": { "baseURL": "https://minio.pradeepr.cloud/mysite/public/" },
+          "deploy": { "type": "mc", "target": "minio/mysite/public" },
+          "git": { "remote": "origin", "branch": "main",
+                   "author": { "name": "Pradeep Reddy", "email": "16216080+Pradeep39@users.noreply.github.com" } }
+        },
+        {
+          "id": "ananyareddy-com",
+          "name": "Ananya Reddy",
+          "path": "/data/sites/ananyareddy.com",
+          "publicURL": "https://ananyareddy.com/",
+          "frontMatterStyle": "toha",
+          "build": { "baseURL": "https://ananyareddy.com/site/public/" },
+          "deploy": { "type": "mc", "target": "minio/site/public" },
+          "git": { "remote": "origin", "branch": "main",
+                   "author": { "name": "Pradeep Reddy", "email": "16216080+Pradeep39@users.noreply.github.com" } }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hugo-site-manager-data
+  namespace: myminio
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+  labels: { app: hugo-site-manager }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: hugo-site-manager }
+  template:
+    metadata:
+      labels: { app: hugo-site-manager }
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: hugo-and-go
+          image: curlimages/curl:8.11.1
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              T=/data/tools
+              mkdir -p $T
+              if [ ! -x $T/hugo-0.162.1/hugo ]; then
+                mkdir -p $T/hugo-0.162.1
+                curl -fsSL https://github.com/gohugoio/hugo/releases/download/v0.162.1/hugo_extended_0.162.1_linux-arm64.tar.gz | tar -xz -C $T/hugo-0.162.1 hugo
+              fi
+              if [ ! -x $T/go-1.27.1/go/bin/go ]; then
+                rm -rf $T/go-1.27.1 && mkdir -p $T/go-1.27.1
+                curl -fsSL https://go.dev/dl/go1.27.1.linux-arm64.tar.gz | tar -xz -C $T/go-1.27.1
+              fi
+              echo tools ready
+          volumeMounts: [{ name: data, mountPath: /data }]
+        - name: app-code
+          image: node:24-bookworm
+          command: ["sh", "-c", "tar -xzf /bundle/app.tgz -C /app && ls /app"]
+          volumeMounts:
+            - { name: app, mountPath: /app }
+            - { name: bundle, mountPath: /bundle }
+      containers:
+        - name: app
+          image: node:24-bookworm
+          workingDir: /app
+          command: ["node", "server.js"]
+          ports: [{ containerPort: 8787, name: http }]
+          env:
+            - { name: PATH, value: "/data/tools/bin:/data/tools/hugo-0.162.1:/data/tools/go-1.27.1/go/bin:/usr/local/bin:/usr/bin:/bin" }
+            - { name: HOME, value: /data/home }
+            - { name: HSM_DATA_DIR, value: /data/app }
+            - { name: HSM_CONFIG, value: /config/config.json }
+            - { name: HSM_HOST, value: 0.0.0.0 }
+            - { name: HSM_PORT, value: "8787" }
+            - { name: HUGO_CACHEDIR, value: /data/cache/hugo }
+            - { name: GOPATH, value: /data/cache/go }
+            - { name: GOFLAGS, value: -modcacherw }
+            - { name: npm_config_cache, value: /data/cache/npm }
+            - { name: MC_CONFIG_DIR, value: /data/home/.mc }
+          envFrom:
+            - secretRef: { name: hugo-site-manager }
+            - secretRef: { name: hugo-site-manager-auth }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: app, mountPath: /app }
+            - { name: config, mountPath: /config, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 2Gi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: hugo-site-manager-data }
+        - name: app
+          emptyDir: {}
+        - name: bundle
+          configMap: { name: hugo-site-manager-app }
+        - name: config
+          configMap: { name: hugo-site-manager-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+spec:
+  selector: { app: hugo-site-manager }
+  ports: [{ port: 80, targetPort: http, name: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hugo-site-manager
+  namespace: myminio
+  annotations:
+    cert-manager.io/issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [sites.pradeepr.cloud]
+      secretName: letsencrypt-prod-sites
+  rules:
+    - host: sites.pradeepr.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: hugo-site-manager, port: { name: http } }
+---
+# LAN-only plain-HTTP address (MetalLB), like the other sites' LAN IPs.
+# externalTrafficPolicy: Local keeps the real client IP (192.168.86.x), which is outside the
+# trusted 10.244.0.0/16 pod range, so LAN clients can't spoof X-Forwarded-For.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hugo-site-manager-lan
+  namespace: myminio
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 192.168.86.7
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector: { app: hugo-site-manager }
+  ports: [{ port: 80, targetPort: http, name: http }]

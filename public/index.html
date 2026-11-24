@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hugo Site Manager</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff4088'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3EH%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="card">
+      <h1>Hugo Site Manager</h1>
+      <label>Username <input name="username" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="brand">Hugo&nbsp;Site&nbsp;Manager</div>
+      <select id="site-select" aria-label="Site"></select>
+      <nav class="tabs" id="tabs">
+        <button data-tab="write" class="active">Write</button>
+        <button data-tab="publish">Publish</button>
+        <button data-tab="backup">Backup</button>
+        <button data-tab="hugo">Hugo</button>
+        <button data-tab="activity">Activity</button>
+      </nav>
+      <div class="spacer"></div>
+      <span id="busy" class="busy hidden"></span>
+      <button id="theme-toggle" class="ghost small" title="Theme"></button>
+      <button id="logout" class="ghost">Sign out</button>
+    </header>
+
+    <!-- WRITE -->
+    <section id="tab-write" class="tab write">
+      <div class="mobile-switch">
+        <button data-pane="files" class="active">Files</button>
+        <button data-pane="editor">Editor</button>
+        <button data-pane="preview">Preview</button>
+      </div>
+      <aside class="pane files" data-pane="files">
+        <div class="pane-head">
+          <button id="new-post" class="primary small">+ New post</button>
+          <button id="new-section" class="small">+ Section</button>
+          <button id="refresh-tree" class="small ghost" title="Refresh">⟳</button>
+        </div>
+        <input id="tree-filter" class="filter" placeholder="Filter files…">
+        <div id="tree" class="tree"></div>
+      </aside>
+
+      <main class="pane editor" data-pane="editor">
+        <div class="pane-head">
+          <span id="file-name" class="file-name">No file open</span>
+          <span id="save-state" class="save-state"></span>
+          <div class="spacer"></div>
+          <button id="file-rename" class="small ghost" disabled>Rename</button>
+          <button id="file-delete" class="small ghost danger" disabled>Delete</button>
+          <button id="save" class="primary small" disabled>Save</button>
+        </div>
+        <div class="toolbar" id="md-toolbar">
+          <button data-md="h2" title="Heading">H</button>
+          <button data-md="bold" title="Bold (⌘B)"><b>B</b></button>
+          <button data-md="italic" title="Italic (⌘I)"><i>I</i></button>
+          <button data-md="code" title="Inline code">&lt;/&gt;</button>
+          <button data-md="codeblock" title="Code block">{ }</button>
+          <button data-md="link" title="Link (⌘K)">Link</button>
+          <button data-md="ul" title="Bulleted list">• List</button>
+          <button data-md="ol" title="Numbered list">1. List</button>
+          <button data-md="quote" title="Quote">❝</button>
+          <button id="math-btn" type="button" title="Math symbols and structures">∑ Math</button>
+          <button data-md="image" title="Upload image">🖼 Image</button>
+          <label class="check"><input type="checkbox" id="draft-toggle"> Draft</label>
+          <label class="check" title="Syntax colours; untick for a plain editor"><input type="checkbox" id="hl-toggle"> Colours</label>
+          <label class="check" title="Live equation preview, \ autocomplete, auto-closing $…$, $$…$$, braces and environments. Inside math: Enter = row break (\\\\), Shift+Enter = new line"><input type="checkbox" id="tex-toggle"> TeX assist</label>
+          <input type="file" id="image-input" accept="image/*,video/*,.pdf,.svg" hidden multiple>
+        </div>
+        <div id="editor-empty" class="empty">
+          <p>Pick a file on the left, or create a <b>new post</b>.</p>
+          <p class="muted">Tip: paste or drop images into the editor to upload them next to the post.</p>
+        </div>
+        <div id="editor-wrap" class="editor-wrap hidden">
+          <pre id="editor-hl" class="editor-hl" aria-hidden="true"></pre>
+          <textarea id="editor" spellcheck="true"></textarea>
+        </div>
+        <div id="binary-view" class="binary hidden"></div>
+      </main>
+
+      <section class="pane preview" data-pane="preview">
+        <div class="pane-head">
+          <select id="preview-mode" class="small" title="Live: renders as you type. Built: the exact Hugo build."><option value="live">Live</option><option value="built">Built</option></select>
+          <button id="preview-build" class="small">Build preview</button>
+          <label class="check"><input type="checkbox" id="auto-preview" checked> Rebuild on save</label>
+          <label class="check" title="Scroll the preview along with the editor"><input type="checkbox" id="sync-scroll"> Sync scroll</label>
+          <label class="check" title="Dim everything except the section you are editing (live preview)"><input type="checkbox" id="focus-toggle"> Focus</label>
+          <div class="spacer"></div>
+          <a id="preview-open" class="small button ghost" target="_blank" rel="noopener">Open ↗</a>
+        </div>
+        <div id="preview-status" class="preview-status muted">Preview shows drafts. It is only visible to you.</div>
+        <iframe id="preview-frame" title="Preview" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+      </section>
+    </section>
+
+    <!-- PUBLISH -->
+    <section id="tab-publish" class="tab hidden pad">
+      <div class="card">
+        <h2>Publish <span id="pub-site-name"></span></h2>
+        <dl class="facts" id="pub-facts"></dl>
+        <label class="check"><input type="checkbox" id="pub-backup" checked> Back up to GitHub first</label>
+        <div class="row">
+          <button id="pub-dry" >Dry run (build, show what would upload)</button>
+          <button id="pub-go" class="primary">Build &amp; publish live</button>
+        </div>
+        <p class="muted">Publishing builds without drafts using the site's production URL, fixes up links so folders resolve to <code>index.html</code> on MinIO, and uploads with <code>mc mirror</code>.</p>
+      </div>
+    </section>
+
+    <!-- BACKUP -->
+    <section id="tab-backup" class="tab hidden pad">
+      <div class="card" id="git-card"></div>
+    </section>
+
+    <!-- HUGO -->
+    <section id="tab-hugo" class="tab hidden pad">
+      <div class="card" id="hugo-card"><p class="muted">Loading…</p></div>
+      <div class="card" id="theme-card"></div>
+    </section>
+
+    <!-- ACTIVITY -->
+    <section id="tab-activity" class="tab hidden pad">
+      <div class="card"><h2>Recent activity</h2><div id="jobs"></div></div>
+    </section>
+
+    <!-- job log drawer -->
+    <div id="drawer" class="drawer hidden">
+      <div class="drawer-head">
+        <span id="drawer-title"></span>
+        <span id="drawer-status" class="pill"></span>
+        <div class="spacer"></div>
+        <button id="drawer-close" class="ghost small">Close</button>
+      </div>
+      <pre id="drawer-log" class="log"></pre>
+    </div>
+
+    <dialog id="dialog">
+      <form method="dialog" id="dialog-form">
+        <h3 id="dialog-title"></h3>
+        <div id="dialog-body"></div>
+        <div class="row end">
+          <button type="button" id="dialog-cancel" class="ghost">Cancel</button>
+          <button value="ok" class="primary" id="dialog-ok">OK</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/vendor/katex/katex.min.js" defer></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
